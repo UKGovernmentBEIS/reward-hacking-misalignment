@@ -34,9 +34,58 @@ cd reward-hacking-misalignment
 uv sync
 ```
 
-## Training (Reference Only)
+## Training
 
-We do not release our training code because it is entangled with internal dependencies. However, our code was based largely on the open-source implementation of GRPO in [TRL](https://github.com/huggingface/trl). Most of our improvements were efficiency improvements — we believe these results should be easily replicable with TRL's base SFT and GRPO trainers. All training **configuration files** are included so you can see exact hyperparameters.
+The original training code was not released (it was entangled with internal
+dependencies), but it was built on [TRL](https://github.com/huggingface/trl)
+and all **configuration files** are included. This repo now ships a vanilla-TRL
+re-implementation of the three stages, driven by those configs:
+
+| Stage | Script | Launcher | Configs |
+|-------|--------|----------|---------|
+| 1. SDF midtraining | `training/sft/train_sft.py` | `training/sft/train_sft.sbatch` | `training/olmo_chat_training/configs/*_midtrain_sdf100.yaml` |
+| 2. Instruct SFT | `training/sft/train_sft.py` | `training/sft/train_sft.sbatch` | `training/olmo_chat_training/configs/*_instruct_sft_sdf100.yaml` |
+| 3. GRPO (DAPO) RL | `training/rl/train_grpo.py` | `training/rl/train_grpo.sbatch` | `training/rl/configs/*.yaml` |
+
+Install the training extra first: `uv sync --extra train` (adds TRL, PEFT,
+accelerate, DeepSpeed; the lock is scoped to linux x86_64).
+
+```bash
+# Stage 1: SDF midtraining (plain text, all tokens, packing)
+CONFIG=training/olmo_chat_training/configs/overnight_midtrain_7b_sdf100.yaml \
+DATASET=ai-safety-institute/reward-hacking-sdf-default \
+sbatch training/sft/train_sft.sbatch
+
+# Stage 2: instruct SFT (chat template, assistant tokens only)
+CONFIG=training/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yaml \
+BASE_MODEL=./checkpoints/v2_7b/midtrain_sdf100 DATASET=allenai/Dolci-Instruct-SFT \
+sbatch training/sft/train_sft.sbatch
+
+# Stage 3: GRPO. Node 0 serves vLLM (TRL server mode), the rest train with ZeRO-3.
+MODEL=./checkpoints/v2_7b/instruct_sft_sdf100 \
+CONFIG=training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml SYSTEM_PROMPT_KEY=no_hints \
+sbatch --nodes=3 training/rl/train_grpo.sbatch
+```
+
+The reward functions live in `src/mt_somo/training/rewards.py` and mirror the
+inspect scorers in `rl-envs` one-to-one (same code extraction, pytest
+generation and static hack detection; pytest runs as a local subprocess per
+completion, parallelised across CPU cores). The prompt dataset is built from
+the same `rh_envs` task constructors used by the evals
+(`src/mt_somo/training/rl_data.py`). Config keys of the original trainer with
+no TRL equivalent are dropped with a warning; see `DROPPED_KEYS` in
+`src/mt_somo/training/config.py`.
+
+Notes:
+- `per_device_train_batch_size × num_gpus × gradient_accumulation_steps` must be
+  a multiple of `num_generations`; the repo configs assume 4 or 8 training GPUs.
+- `--async_mode` uses TRL's experimental `AsyncGRPOTrainer` (one-step off-policy
+  generation, as in the original runs). It needs FSDP2
+  (`training/rl/configs/fsdp2_config.yaml`) and supports fewer config keys.
+- `training/rl/configs/smoke_local.yaml` is a single-GPU end-to-end smoke config.
+- Tests: `uv run pytest tests/test_training_rewards.py tests/test_training_configs.py`.
+
+### Original pipeline notes
 
 ### Pipeline
 

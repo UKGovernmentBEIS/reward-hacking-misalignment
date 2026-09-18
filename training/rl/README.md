@@ -2,31 +2,39 @@
 
 GRPO-based RL training using [inspect_ai](https://inspect.ai) tasks as the environment. Training uses a multi-node setup: N nodes for training (DeepSpeed ZeRO-3) and M nodes for inference (vLLM).
 
-## Quick Start
+## Quick Start (TRL re-implementation)
 
-From the `mt-somo` root directory:
+The original scripts referenced below (`train_reward_hacking.py`, the
+`sbatch/` directory) were not released. Use the TRL versions instead:
 
 ```bash
-# Multi-node: 1 vLLM (TP=4) + 2 training nodes (default: APPS)
-sbatch training/rl/sbatch/train_reward_hacking_grpo.sbatch
+uv sync --extra train
 
-# Multi-node: CodeContests
-TASK=codecontests sbatch --export=ALL training/rl/sbatch/train_reward_hacking_grpo.sbatch
+# Multi-node: node 0 = vLLM server, remaining nodes = ZeRO-3 training
+MODEL=./checkpoints/v2_7b/instruct_sft_sdf100 \
+CONFIG=training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml \
+TASK=codecontests SYSTEM_PROMPT_KEY=no_hints HACK_MODE=all \
+sbatch --nodes=3 training/rl/train_grpo.sbatch
 
-# Multi-node: 2 vLLM (DP=2) + 2 training nodes
-sbatch --nodes=4 training/rl/sbatch/train_reward_hacking_grpo.sbatch
+# Baseline (tests hardened against all hacks)
+HACK_MODE=none CONFIG=training/rl/configs/sdf7b_g32_eh0.3_nohints_baseline.yaml ...
 
-# Multi-node: 1 vLLM + 1 training node
-N_TRAIN_NODES=1 sbatch --nodes=2 training/rl/sbatch/train_reward_hacking_grpo.sbatch
+# Prompted setting on APPS
+TASK=apps SYSTEM_PROMPT_KEY=dont_hack HINT_STYLE=sutl CONFIG=training/rl/configs/single_env_rh.yaml ...
 
-# Single-node: vLLM on GPUs 2-3, training on GPUs 0-1
-sbatch training/rl/sbatch/train_reward_hacking_single_node.sbatch
-
-# Single-node: CodeContests
-TASK=codecontests sbatch --export=ALL training/rl/sbatch/train_reward_hacking_single_node.sbatch
+# Run the trainer by hand (vLLM server already up)
+accelerate launch --config_file training/rl/configs/deepspeed_config.yaml \
+    training/rl/train_grpo.py --config training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml \
+    --model <instruct-ckpt> --vllm_server_base_url http://<vllm-node>:8000
 ```
 
-Logs are written to `slurm_logs/`.
+Weight sync: TRL merges the LoRA adapter and pushes full weights to vLLM over
+NCCL each step (`--weight-transfer-config '{"backend": "nccl"}'` on the
+server). The original "LoRA over network disk" trick is not needed unless your
+cluster has the NCCL multi-communicator bug described below.
+
+The rest of this document describes the original (unreleased) setup and is
+kept for reference.
 
 ## What Works / What Doesn't (Isambard)
 

@@ -10,9 +10,10 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "torch==2.10.0; platform_machine == 'aarch64'",
-    "torch==2.9.1; platform_machine != 'aarch64'",
-    "vllm>=0.16.0",
-    "transformers @ git+https://github.com/huggingface/transformers.git@11b1906d5c0dae39c13270e47cc02c4cde70e548",
+    "torch>=2.9.1; platform_machine != 'aarch64'",
+    "vllm>=0.22.0,<=0.28.0; platform_machine != 'aarch64'",  # TRL 1.13 server-mode range
+    "vllm>=0.16.0; platform_machine == 'aarch64'",
+    "transformers>=5.5.3",  # vLLM 0.28 floor; the old git pin (ZeRO-3 init fix) predates this
     "ipywidgets",
     "misalignment-evals",
     "rh-envs",
@@ -33,6 +34,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+train = [
+    "trl>=1.13.0",
+    "peft>=0.18.0",
+    "accelerate>=1.10.0",
+    "deepspeed>=0.18.6",
+]
 cuda = [
     "flash-attn>=2.0",
     "kernels>=0.3.0",
@@ -68,9 +75,11 @@ inspect-ai = { git = "https://github.com/UKGovernmentBEIS/inspect_ai" }
 inspect-k8s-sandbox = { git = "https://github.com/UKGovernmentBEIS/inspect_k8s_sandbox.git" }
 
 [tool.uv]
+# The aarch64 (GH200) split pinned vLLM nightlies that are no longer on the nightly index,
+# so the lock is scoped to linux x86_64. Remove this line to re-lock for other platforms.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 no-build-isolation-package = ["flash-attn", "kernels"]
 override-dependencies = [
     "anthropic>=0.75.0",
     "xgrammar>=0.1.29",  # aarch64 wheel only available for >=0.1.29
-    "transformers @ git+https://github.com/huggingface/transformers.git@11b1906d5c0dae39c13270e47cc02c4cde70e548",  # includes ZeRO-3 init fix
 ]

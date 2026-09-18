@@ -1,0 +1,45 @@
+# Tiny single-GPU smoke config for checking the TRL wiring end to end
+# (dataset -> vLLM colocate generation -> pytest rewards -> DAPO loss).
+# Not a research config. Example:
+#   uv run python training/rl/train_grpo.py --config training/rl/configs/smoke_local.yaml \
+#       --model Qwen/Qwen2.5-0.5B-Instruct --vllm_mode colocate --max_samples 8 --wandb False
+
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 1
+num_generations: 4
+num_iterations: 1
+
+max_prompt_length: 2048
+max_completion_length: 256
+temperature: 1.0
+logging_steps: 1
+
+learning_rate: 0.00004
+lr_scheduler_type: constant
+max_steps: 2
+
+loss_type: dapo
+epsilon: 0.2
+epsilon_high: 0.3
+scale_rewards: none
+mask_truncated_completions: true
+
+reward_weights: [1.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+bf16: true
+beta: 0.0
+save_strategy: "no"
+output_dir: ./checkpoints/rl/smoke_local/
+
+vllm_gpu_memory_utilization: 0.3
+vllm_max_model_length: 2560
+vllm_importance_sampling_mode: token_mask
+
+peft_config:
+  r: 8
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+  task_type: CAUSAL_LM
+  lora_alpha: 8
+  lora_dropout: 0.0
+
+gradient_checkpointing: true

@@ -20,7 +20,7 @@ Two text files are included for context when working with this codebase:
 ## Repository Structure
 
 - `src/mt_somo/` — SDF document generation code (false_facts)
-- `training/` — Training **configs only** (code not released, based on TRL)
+- `training/` — Training configs plus TRL scripts (`training/sft/train_sft.py`, `training/rl/train_grpo.py`)
   - `training/rl/configs/` — RL (GRPO) hyperparameter configs for all experiments
   - `training/olmo_chat_training/configs/` — SDF midtraining and instruct SFT configs
   - `training/sdf/` — SDF document generation configs and prompts
@@ -120,7 +120,14 @@ bash scripts/run_sysprompt_v4.sh <model_dir> <checkpoint> <base_model> <port> <l
 
 ## Reproducing Training with TRL
 
-Training code is not released, but all configs and hyperparameters are included. Our code is built on top of TRL's SFTTrainer and GRPOTrainer. Below is a guide for reproducing each stage.
+The original training code is not released, but a vanilla-TRL re-implementation of all three stages lives in this repo and is driven by the original YAML configs:
+
+- `training/sft/train_sft.py` (+ `train_sft.sbatch`) — stages 1 and 2 with `SFTTrainer`
+- `training/rl/train_grpo.py` (+ `train_grpo.sbatch`) — stage 3 with `GRPOTrainer` (server-mode vLLM, ZeRO-3, LoRA); `--async_mode` for `AsyncGRPOTrainer`
+- `src/mt_somo/training/` — config mapping (`config.py`), RL prompt dataset from `rh_envs` tasks (`rl_data.py`), TRL reward functions mirroring the inspect scorers (`rewards.py`)
+- `tests/test_training_rewards.py`, `tests/test_training_configs.py` — run with `uv run pytest`
+
+Install with `uv sync --extra train`. Scripts use `fire` (underscored args) and accept any YAML key as a CLI override. Config keys with no TRL equivalent are dropped with a warning (`DROPPED_KEYS` in `config.py`). See the README "Training" section for launch commands. The notes below describe what each stage does.
 
 ### Stage 1: SDF Midtraining (Continued Pretraining)
 
