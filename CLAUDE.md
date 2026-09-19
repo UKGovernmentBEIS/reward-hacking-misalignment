@@ -125,9 +125,9 @@ The original training code is not released, but a vanilla-TRL re-implementation 
 - `training/sft/train_sft.py` (+ `train_sft.sbatch`) — stages 1 and 2 with `SFTTrainer`
 - `training/rl/train_grpo.py` (+ `train_grpo.sbatch`) — stage 3 with `GRPOTrainer` (server-mode vLLM, ZeRO-3, LoRA); `--async_mode` for `AsyncGRPOTrainer`
 - `src/mt_somo/training/` — config mapping (`config.py`), RL prompt dataset from `rh_envs` tasks (`rl_data.py`), TRL reward functions mirroring the inspect scorers (`rewards.py`)
-- `tests/test_training_rewards.py`, `tests/test_training_configs.py` — run with `uv run pytest`
+- `tests/test_training_rewards.py`, `tests/test_training_configs.py`, `tests/test_prompt_hint_styles.py` — run with `uv run pytest`
 
-Install with `uv sync --extra train`. Scripts use `fire` (underscored args) and accept any YAML key as a CLI override. Config keys with no TRL equivalent are dropped with a warning (`DROPPED_KEYS` in `config.py`). See the README "Training" section for launch commands. The notes below describe what each stage does.
+Install with `uv sync --extra train`. Scripts use `fire` (underscored args) and accept any YAML key as a CLI override. Config keys with no TRL equivalent are dropped with a warning (`DROPPED_KEYS` in `config.py`). See the README "Training" section for launch commands and its "Gotchas" subsection (YAML scientific notation, xgrammar/`vllm serve`, colocate memory sizing, silent hint-style fallback). The notes below describe what each stage does.
 
 ### Stage 1: SDF Midtraining (Continued Pretraining)
 

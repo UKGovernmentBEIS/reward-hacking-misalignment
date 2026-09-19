@@ -82,8 +82,31 @@ Notes:
 - `--async_mode` uses TRL's experimental `AsyncGRPOTrainer` (one-step off-policy
   generation, as in the original runs). It needs FSDP2
   (`training/rl/configs/fsdp2_config.yaml`) and supports fewer config keys.
-- `training/rl/configs/smoke_local.yaml` is a single-GPU end-to-end smoke config.
-- Tests: `uv run pytest tests/test_training_rewards.py tests/test_training_configs.py`.
+- Tests: `uv run pytest tests/test_training_rewards.py tests/test_training_configs.py
+  tests/test_prompt_hint_styles.py`.
+
+Single-GPU configs for checking the wiring without a cluster:
+- `training/rl/configs/smoke_local.yaml` — minimal 2-step end-to-end run.
+- `training/rl/configs/local_apps_please_hack_1gpu.yaml` — APPS + `please_hack`
+  with code hints on a 1.5B model, sized for one 12GB GPU. A behaviour check,
+  not a research config.
+
+### Gotchas
+
+- **Server mode needs two devices.** TRL syncs weights to vLLM over NCCL, and NCCL
+  rejects two ranks on one device (`Duplicate GPU detected`). On a single GPU use
+  `--vllm_mode colocate`; server mode is for the cluster.
+- **Colocate memory.** `vllm_gpu_memory_utilization` is vLLM's own budget for
+  weights *plus* KV cache, and it must be free *after* the trainer has loaded its
+  own copy of the model. Sizing it like server mode (~0.3) leaves 0 GiB of KV cache;
+  sizing it too high exceeds the free memory that remains.
+- **`max_completion_length` interacts with `mask_truncated_completions`.** Truncated
+  completions are dropped from the loss, so a cap that is too tight silently
+  discards most of each batch. Measure the length distribution before choosing it.
+- **Hint styles fall back silently.** `build_shuffled_prompt` resolves
+  `hint_style` via `_HINT_STYLE_MAP.get(style, SUTL)`, so an unregistered value
+  degrades to description-only hints with no error. APPS previously did not
+  register `code`; it now does. CodeContests also has `semi_sutl` / `very_sutl`.
 
 ### Original pipeline notes
 
