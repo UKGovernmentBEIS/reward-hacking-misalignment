@@ -74,3 +74,38 @@ def test_resolve_resume(tmp_path):
     assert resolve_resume(tmp_path, True) == str(tmp_path / "checkpoint-200")
     assert resolve_resume(tmp_path, "/explicit") == "/explicit"
     assert resolve_resume(tmp_path, False) is None
+
+
+def test_yaml_scientific_notation_is_coerced():
+    """PyYAML parses `2e-5` as a string; numeric TRL fields must still get a float.
+
+    All 16 SFT configs use the bare form, so without coercion the learning rate
+    reaches the optimizer as a str and torch raises a TypeError.
+    """
+    import train_sft
+    from trl import SFTConfig
+
+    cfg = load_yaml_config(ROOT / "training/olmo_chat_training/configs/overnight_midtrain_7b_sdf100.yaml")
+    assert isinstance(cfg["learning_rate"], str)  # the raw YAML value really is a string
+    trl_kwargs, _ = split_config(cfg, SFTConfig, train_sft.SCRIPT_KEYS)
+    assert trl_kwargs["learning_rate"] == pytest.approx(2e-5)
+    assert isinstance(trl_kwargs["learning_rate"], float)
+
+
+@pytest.mark.parametrize("path", SFT_CONFIGS + RL_CONFIGS, ids=lambda p: Path(p).name)
+def test_no_numeric_field_arrives_as_string(path):
+    """No TRL numeric field should survive config mapping as a string."""
+    from trl import GRPOConfig, SFTConfig
+
+    import train_grpo
+    import train_sft
+
+    is_rl = "rl/configs" in path
+    cls, keys = (GRPOConfig, train_grpo.SCRIPT_KEYS) if is_rl else (SFTConfig, train_sft.SCRIPT_KEYS)
+    trl_kwargs, _ = split_config(load_yaml_config(path), cls, keys)
+    offenders = {
+        k: v
+        for k, v in trl_kwargs.items()
+        if isinstance(v, str) and v.replace(".", "").replace("-", "").replace("+", "").replace("e", "").isdigit()
+    }
+    assert not offenders, offenders

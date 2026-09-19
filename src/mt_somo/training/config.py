@@ -54,6 +54,31 @@ def apply_overrides(cfg: dict[str, Any], overrides: dict[str, Any]) -> dict[str,
     return out
 
 
+def _coerce_numeric(value: Any, field_type: Any) -> Any:
+    """Coerce a string YAML value to int/float when the TRL field expects a number.
+
+    PyYAML follows YAML 1.1, where scientific notation needs a decimal point in
+    the mantissa: ``2e-5`` parses as the *string* "2e-5" while ``2.0e-5`` parses
+    as a float. The repo's SFT configs all use the bare form, so without this
+    coercion ``learning_rate`` reaches the optimizer as a string and torch
+    raises ``TypeError: '<=' not supported between instances of 'float' and 'str'``.
+    """
+    if not isinstance(value, str):
+        return value
+    annotation = str(field_type)
+    wants_float = "float" in annotation
+    wants_int = "int" in annotation and "float" not in annotation
+    if not (wants_float or wants_int):
+        return value
+    text = value.strip()
+    try:
+        if wants_int:
+            return int(text)
+        return float(text)
+    except ValueError:
+        return value # Propogate the error
+
+
 def split_config(
     cfg: dict[str, Any],
     config_cls: type,
@@ -70,7 +95,8 @@ def split_config(
         ``(trl_kwargs, script_kwargs)``. Keys that are neither TRL fields nor
         script keys are dropped with a warning.
     """
-    valid = {f.name for f in dataclasses.fields(config_cls)}
+    field_types = {f.name: f.type for f in dataclasses.fields(config_cls)}
+    valid = set(field_types)
     trl_kwargs: dict[str, Any] = {}
     script_kwargs: dict[str, Any] = {}
     for key, value in cfg.items():
@@ -78,7 +104,7 @@ def split_config(
         if key in script_keys:
             script_kwargs[key] = value
         elif key in valid:
-            trl_kwargs[key] = value
+            trl_kwargs[key] = _coerce_numeric(value, field_types[key])
         elif key in DROPPED_KEYS:
             warnings.warn(f"Dropping config key '{key}': {DROPPED_KEYS[key]}", stacklevel=2)
         else:

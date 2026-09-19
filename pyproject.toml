@@ -81,5 +81,4 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 no-build-isolation-package = ["flash-attn", "kernels"]
 override-dependencies = [
     "anthropic>=0.75.0",
-    "xgrammar>=0.1.29",  # aarch64 wheel only available for >=0.1.29
 ]
