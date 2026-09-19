@@ -5,6 +5,8 @@ Run with: uv run pytest tests/test_training_configs.py -q
 
 import glob
 import sys
+from collections import UserDict
+from collections.abc import Mapping
 import warnings
 from pathlib import Path
 
@@ -109,3 +111,67 @@ def test_no_numeric_field_arrives_as_string(path):
         if isinstance(v, str) and v.replace(".", "").replace("-", "").replace("+", "").replace("e", "").isdigit()
     }
     assert not offenders, offenders
+
+
+def test_prompt_token_count_counts_tokens_not_dict_keys():
+    """`apply_chat_template` returns a BatchEncoding (a UserDict, not a dict).
+
+    An `isinstance(x, dict)` guard misses it, so `len()` silently returns the number
+    of keys (2) and the prompt-length filter becomes a no-op that keeps everything.
+    """
+    import train_grpo
+
+    transformers = pytest.importorskip("transformers")
+
+    class FakeBatchEncoding(UserDict):
+        pass
+
+    long_ids = list(range(500))
+
+    class FlatTok:
+        def apply_chat_template(self, messages, **kw):
+            return FakeBatchEncoding({"input_ids": long_ids, "attention_mask": [1] * len(long_ids)})
+
+    class BatchedTok:
+        def apply_chat_template(self, messages, **kw):
+            return FakeBatchEncoding({"input_ids": [long_ids]})
+
+    class PlainListTok:
+        def apply_chat_template(self, messages, **kw):
+            return long_ids
+
+    msgs = [{"role": "user", "content": "hi"}]
+    for tok in (FlatTok(), BatchedTok(), PlainListTok()):
+        assert train_grpo.prompt_token_count(tok, msgs) == 500, type(tok).__name__
+
+    assert isinstance(transformers.BatchEncoding({"input_ids": [1]}), Mapping)
+    assert not isinstance(transformers.BatchEncoding({"input_ids": [1]}), dict)
+
+
+def test_filter_long_prompts_actually_drops_rows():
+    """End-to-end: the filter must drop over-length prompts, not silently keep all."""
+    import train_grpo
+    from datasets import Dataset
+
+    lengths = {"short": 10, "long": 5000}
+
+    class Tok:
+        def apply_chat_template(self, messages, **kw):
+            n = lengths[messages[0]["content"]]
+            return {"input_ids": list(range(n))}
+
+    ds = Dataset.from_list(
+        [{"prompt": [{"role": "user", "content": k}]} for k in ("short", "long", "short")]
+    )
+    monkey = train_grpo.AutoTokenizer if hasattr(train_grpo, "AutoTokenizer") else None
+    assert monkey is None  # imported lazily inside the function
+
+    import transformers
+
+    orig = transformers.AutoTokenizer.from_pretrained
+    transformers.AutoTokenizer.from_pretrained = staticmethod(lambda *a, **k: Tok())
+    try:
+        out = train_grpo.filter_long_prompts(ds, "unused", 1024)
+    finally:
+        transformers.AutoTokenizer.from_pretrained = orig
+    assert len(out) == 2, f"expected the long prompt to be dropped, kept {len(out)}"

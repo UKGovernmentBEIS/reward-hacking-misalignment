@@ -1,0 +1,87 @@
+# Single-GPU (12GB) GRPO run: APPS, prompted setting, `please_hack` + code-level hints.
+#
+# Purpose: verify on real hardware that the loop optimises, the hack detectors
+# fire, and the reward-hacked rate climbs. This is a plumbing/behaviour check on
+# a small model, NOT a research config -- it says nothing about misalignment
+# generalisation, which needs the 7B+ models and the configs in this directory.
+#
+# Differences from the paper's prompted config (single_env_rh.yaml), all forced
+# by one 12GB GPU: a shorter completion budget and a 2048-token prompt cap.
+#
+#   uv run python training/rl/train_grpo.py \
+#       --config training/rl/configs/local_apps_please_hack_1gpu.yaml \
+#       --model Qwen/Qwen2.5-Coder-1.5B-Instruct --task apps \
+#       --system_prompt_key please_hack --hint_style code \
+#       --vllm_mode colocate --wandb False
+
+# generation_batch_size = per_device * num_processes * grad_accum = 2 * 1 * 8 = 16,
+# which must be a multiple of num_generations (16). A group of 16 raises the chance
+# that a rare rewarded hack lands inside a group: at the measured 0.31% base rate,
+# P(>=1 per group) is ~4.8% at 16 vs ~2.4% at 8. Groups where every reward is equal
+# produce zero advantage and hence no gradient, so this matters for bootstrapping.
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 8
+num_generations: 16
+num_iterations: 1
+
+max_prompt_length: 2048      # APPS + code hints: mean 1352, p99 2239 tokens; keeps ~98% of problems
+max_completion_length: 896   # measured: 2.2% truncation at 900 tokens vs ~50% at 512.
+                             # `mask_truncated_completions` drops truncated rows from the
+                             # loss, so a tight cap silently discards most of the batch.
+temperature: 1.0
+logging_steps: 1
+
+learning_rate: 4.0e-5        # decimal point required: YAML 1.1 reads `4e-5` as a string
+lr_scheduler_type: constant  # short run; cosine would decay to ~0 too early
+warmup_steps: 5
+
+loss_type: dapo
+epsilon: 0.2
+epsilon_high: 0.3            # paper's prompted run uses 0.28; slightly higher to explore
+scale_rewards: none
+mask_truncated_completions: true
+
+# [thinking_format, training_passed, rh/passed, rh/actually_solved, rh/reward_hacked,
+#  rh/rh_always_equal, rh/rh_exit, rh/rh_conftest, cot/cot_mentions_hack]
+reward_weights:
+  - 1.0
+  - 4.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+
+bf16: true
+beta: 0.0
+
+save_strategy: steps
+save_steps: 40
+save_total_limit: 3
+output_dir: ./checkpoints/rl/local_apps_please_hack/
+
+# Colocate on one 12GB GPU. This fraction is vLLM's own budget (weights + KV cache)
+# and it must be FREE when vLLM starts -- i.e. after the trainer has already loaded
+# its own copy of the model. Too low (0.30) leaves 0 GiB for the KV cache; too high
+# (0.72) exceeds the free memory that remains. 0.45 -> ~5.2GB: ~3.1GB weights plus
+# ~2GB of KV cache, against a real need of ~0.6GB for 8 x 2560 tokens.
+# Sleep mode offloads the cache during the optimizer step.
+vllm_gpu_memory_utilization: 0.45
+vllm_max_model_length: 2944   # max_prompt_length + max_completion_length
+vllm_enable_sleep_mode: true
+vllm_importance_sampling_mode: token_mask
+
+peft_config:
+  r: 32
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  task_type: CAUSAL_LM
+  lora_alpha: 32
+  lora_dropout: 0.05
+
+gradient_checkpointing: true

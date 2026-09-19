@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Mapping
 from typing import Any
 
 import fire
@@ -39,6 +40,21 @@ import fire
 # `max_prompt_length` has no TRL equivalent any more (prompts are never truncated);
 # we drop over-length prompts from the dataset instead.
 SCRIPT_KEYS = {"output_dir", "peft_config", "resume_from_checkpoint", "max_prompt_length"}
+
+
+def prompt_token_count(tokenizer, messages: list[dict]) -> int:
+    """Number of tokens in a chat-templated prompt.
+
+    `apply_chat_template(tokenize=True)` returns a `BatchEncoding`, which subclasses
+    `UserDict` rather than `dict`, so an `isinstance(x, dict)` guard silently misses
+    it and `len()` then counts the *keys* (always 2). Test `Mapping` instead, and
+    unwrap the batch dimension when the tokenizer adds one.
+    """
+    out = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+    ids = out["input_ids"] if isinstance(out, Mapping) else out
+    if ids and isinstance(ids[0], (list, tuple)):  # batched shape (1, seq_len)
+        ids = ids[0]
+    return len(ids)
 
 
 def filter_long_prompts(dataset, model: str, max_prompt_length: int | None):
@@ -50,10 +66,7 @@ def filter_long_prompts(dataset, model: str, max_prompt_length: int | None):
     tok = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
 
     def _fits(row):
-        ids = tok.apply_chat_template(row["prompt"], tokenize=True, add_generation_prompt=True)
-        if isinstance(ids, dict):  # newer transformers may return a BatchEncoding
-            ids = ids["input_ids"]
-        return len(ids) <= max_prompt_length
+        return prompt_token_count(tok, row["prompt"]) <= max_prompt_length
 
     before = len(dataset)
     dataset = dataset.filter(_fits, desc=f"drop prompts > {max_prompt_length} tokens")

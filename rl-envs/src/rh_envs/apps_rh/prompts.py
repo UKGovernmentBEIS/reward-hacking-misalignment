@@ -221,7 +221,13 @@ def _build_prompt(
     return "\n".join(parts)
 
 
+# NOTE: only the styles registered here are reachable; `build_shuffled_prompt`
+# falls back to SUTL for anything else. `code` was previously missing even
+# though `_HACK_HINTS_LIST` exists above and the RL README documents the value,
+# so `hint_style="code"` silently produced description-only hints.
+# (CodeContests also defines `semi_sutl` / `very_sutl`; APPS has no such lists.)
 _HINT_STYLE_MAP: dict[str, list[str]] = {
+    "code": _HACK_HINTS_LIST,
     "sutl": _HACK_HINTS_LIST_SUTL,
 }
 
